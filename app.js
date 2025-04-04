@@ -100,14 +100,17 @@ app.get('/leaveChannel', (req, res) => {
         res.json({ error: error.message });
     }
 })
-app.get("removeChannel/:channelName", (req, res) => {
+app.get("/removeChannel/:channelName", (req, res) => {
     try {
         const { channelName } = req.params;
         const channel = channels.find((channel) => channel.name === channelName);
+        console.log("removing")
         if (!channel) {
             return res.status(400).json({ error: 'Channel not found' });
         }
         const index = channels.indexOf(channel);
+
+        console.log("removing",channel)
         channels.splice(index, 1);
         return res.status(200).json({ channels });
     } catch (error) {
@@ -123,6 +126,10 @@ var generateRtcToken = function (req, resp) {
         var currentTimestamp = Math.floor(Date.now() / 1000);
         var privilegeExpiredTs = currentTimestamp + expirationTimeInSeconds;
         var channelName = req.query.channelName;
+        const userId = req.query.id;
+        if (!userId) {
+            return resp.status(400).json({ error: "user id is required" })
+        }
         var uid = 0;
 
         if (!channelName) {
@@ -141,7 +148,7 @@ var generateRtcToken = function (req, resp) {
             privilegeExpiredTs
         );
 
-        channels.push({ name: channelName, key: key, host: uid, members: [uid] });
+        channels.push({ name: channelName, key: key, host: uid, members: [uid], hostId: userId });
         resp.header("Access-Control-Allow-Origin", "*");
         return resp.json({ name: channelName, key: key, host: uid });
     } catch (error) {
