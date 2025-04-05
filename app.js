@@ -2,6 +2,7 @@ var http = require('http');
 const cors = require('cors');
 const morgan = require('morgan');
 var express = require('express');
+const { Server } = require('socket.io');
 var { RtcTokenBuilder, RtmTokenBuilder, RtcRole } = require('agora-access-token');
 
 var PORT = 3000;
@@ -25,6 +26,47 @@ app.use(morgan("dev"));
 const channels = [
 
 ];
+const server = http.createServer(app);
+// Set up Socket.IO
+const io = new Server(server, {
+    cors: {
+        origin: '*',
+        methods: ['GET', 'POST']
+    }
+});
+
+// Store comments in memory (optional: use DB instead)
+const commentsMap = {}; // { [livestreamId]: [commentObj] }
+
+io.on('connection', (socket) => {
+    console.log(`User connected: ${socket.id}`);
+
+    socket.on('join_livestream', (livestreamId) => {
+        socket.join(livestreamId);
+        console.log(`User ${socket.id} joined livestream ${livestreamId}`);
+    });
+
+    socket.on('send_comment', ({ livestreamId, username, comment }) => {
+        const commentData = {
+            id: Date.now(),
+            username,
+            comment,
+            timestamp: new Date().toISOString()
+        };
+
+        // Save in memory
+        if (!commentsMap[livestreamId]) commentsMap[livestreamId] = [];
+        commentsMap[livestreamId].push(commentData);
+
+        // Broadcast to room
+        io.to(livestreamId).emit('receive_comment', commentData);
+    });
+
+    socket.on('disconnect', () => {
+        console.log(`User disconnected: ${socket.id}`);
+    });
+});
+
 app.get("/updatehost/:channelName", (req, res) => {
     try {
         const { channelName } = req.params;
@@ -174,6 +216,6 @@ var generateRtmToken = function (req, resp) {
 app.get('/createChannnel', generateRtcToken);
 // app.get('/rtmToken', generateRtmToken);
 
-http.createServer(app).listen(app.get('port'), function () {
+server.listen(app.get('port'), function () {
     console.log('AgoraSignServer starts at port ' + app.get('port'));
 });
