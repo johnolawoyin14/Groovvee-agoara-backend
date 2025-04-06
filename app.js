@@ -1,8 +1,8 @@
-var http = require('http');
-const cors = require('cors');
-const morgan = require('morgan');
 var express = require('express');
 const { Server } = require('socket.io');
+const http = require('http');
+const cors = require('cors');
+const morgan = require('morgan');
 var { RtcTokenBuilder, RtmTokenBuilder, RtcRole } = require('agora-access-token');
 
 var PORT = 3000;
@@ -20,13 +20,12 @@ app.set('port', PORT);
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(cors())
+app.use(cors());
 app.use(morgan("dev"));
 
-const channels = [
-
-];
+const channels = []; // Store channel data, including view count
 const server = http.createServer(app);
+
 // Set up Socket.IO
 const io = new Server(server, {
     cors: {
@@ -44,6 +43,25 @@ io.on('connection', (socket) => {
     socket.on('join_livestream', (livestreamId) => {
         socket.join(livestreamId);
         console.log(`User ${socket.id} joined livestream ${livestreamId}`);
+
+        // Increment view count for the channel
+        const channel = channels.find((channel) => channel.name === livestreamId);
+        if (channel) {
+            channel.viewCount = (channel.viewCount || 0) + 1;
+            io.to(livestreamId).emit('view_count', { viewCount: channel.viewCount });
+        }
+    });
+
+    socket.on('leave_livestream', (livestreamId) => {
+        socket.leave(livestreamId);
+        console.log(`User ${socket.id} left livestream ${livestreamId}`);
+
+        // Decrement view count for the channel
+        const channel = channels.find((channel) => channel.name === livestreamId);
+        if (channel) {
+            channel.viewCount = (channel.viewCount || 0) - 1;
+            io.to(livestreamId).emit('view_count', { viewCount: channel.viewCount });
+        }
     });
 
     socket.on('send_comment', ({ livestreamId, username, comment }) => {
@@ -60,18 +78,20 @@ io.on('connection', (socket) => {
 
         // Broadcast to room
         io.to(livestreamId).emit('receive_comment', commentData);
-    }); socket.on('send_heart', (livestreamId) => {
+    });
+
+    socket.on('send_heart', (livestreamId) => {
         io.to(livestreamId).emit('receive_heart', {
             id: Date.now(), // for animation key
         });
     });
-
 
     socket.on('disconnect', () => {
         console.log(`User disconnected: ${socket.id}`);
     });
 });
 
+// API Routes
 app.get("/updatehost/:channelName", (req, res) => {
     try {
         const { channelName } = req.params;
@@ -83,42 +103,23 @@ app.get("/updatehost/:channelName", (req, res) => {
         channel.host = uid;
         channel.members.unshift(uid);
         return res.status(200).json({ channel });
-
     } catch (error) {
         res.json({ error: error.message });
     }
-})
+});
 
-app.get('/joinChannel', (req, res) => {
-    try {
-        const { channelName, uid } = req.body;
-        const channel = channels.find((channel) => channel.name === channelName);
-        if (!channel) {
-            return res.status(400).json({ error: 'Channel not found' });
-        }
-        if (channel.members.includes(uid)) {
-            return res.status(200).json({ channel });
-        }
-        channel.members.push(uid);
-        return res.status(200).json({ channel });
-    } catch (error) {
-        res.json({ error: error.message });
-    }
-})
 app.get('/getChannels', (req, res) => {
     try {
-
         return res.status(200).json({ channels });
     } catch (error) {
         res.json({ error: error.message });
     }
-})
+});
+
 app.get('/getChannel/:channelName', (req, res) => {
     try {
         const { channelName } = req.params;
-        console.log(channelName)
         const channel = channels.find((channel) => channel.name === channelName);
-        console.log(channel)
         if (!channel) {
             return res.status(400).json({ error: 'Channel not found' });
         }
@@ -126,7 +127,8 @@ app.get('/getChannel/:channelName', (req, res) => {
     } catch (error) {
         res.json({ error: error.message });
     }
-})
+});
+
 app.get('/leaveChannel', (req, res) => {
     try {
         const { channelName, uid } = req.query;
@@ -146,30 +148,26 @@ app.get('/leaveChannel', (req, res) => {
     } catch (error) {
         res.json({ error: error.message });
     }
-})
+});
+
 app.get("/removeChannel/:channelName", (req, res) => {
     try {
         const { channelName } = req.params;
         const channel = channels.find((channel) => channel.name === channelName);
-        console.log("removing")
         if (!channel) {
             return res.status(400).json({ error: 'Channel not found' });
         }
         const index = channels.indexOf(channel);
-
-        console.log("removing",channel)
         channels.splice(index, 1);
         return res.status(200).json({ channels });
     } catch (error) {
-        console.log(error)
         res.json({ error: error.message });
     }
-})
+});
 
+// Generate RTC token (for Agora)
 var generateRtcToken = function (req, resp) {
-
     try {
-
         var currentTimestamp = Math.floor(Date.now() / 1000);
         var privilegeExpiredTs = currentTimestamp + expirationTimeInSeconds;
         var channelName = req.query.channelName;
@@ -195,7 +193,7 @@ var generateRtcToken = function (req, resp) {
             privilegeExpiredTs
         );
 
-        channels.push({ name: channelName, key: key, host: uid, members: [uid], hostId: userId });
+        channels.push({ name: channelName, key: key, host: uid, members: [uid], hostId: userId, viewCount: 0 });
         resp.header("Access-Control-Allow-Origin", "*");
         return resp.json({ name: channelName, key: key, host: uid });
     } catch (error) {
@@ -203,23 +201,7 @@ var generateRtcToken = function (req, resp) {
     }
 };
 
-var generateRtmToken = function (req, resp) {
-    var currentTimestamp = Math.floor(Date.now() / 1000);
-    var privilegeExpiredTs = currentTimestamp + expirationTimeInSeconds;
-    var account = req.query.account;
-
-    if (!account) {
-        return resp.status(400).json({ error: 'Account is required' });
-    }
-
-    var key = RtmTokenBuilder.buildToken(appID, appCertificate, account, RtcRole, privilegeExpiredTs);
-
-    resp.header("Access-Control-Allow-Origin", "*");
-    return resp.json({ key });
-};
-
 app.get('/createChannnel', generateRtcToken);
-// app.get('/rtmToken', generateRtmToken);
 
 server.listen(app.get('port'), function () {
     console.log('AgoraSignServer starts at port ' + app.get('port'));
