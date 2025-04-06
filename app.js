@@ -60,7 +60,12 @@ io.on('connection', (socket) => {
 
         // Broadcast to room
         io.to(livestreamId).emit('receive_comment', commentData);
+    }); socket.on('send_heart', (livestreamId) => {
+        io.to(livestreamId).emit('receive_heart', {
+            id: Date.now(), // for animation key
+        });
     });
+
 
     socket.on('disconnect', () => {
         console.log(`User disconnected: ${socket.id}`);
